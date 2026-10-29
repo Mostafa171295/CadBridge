@@ -1,0 +1,17 @@
+# Normalise line endings; keep Windows files CRLF in the working tree
+* text=auto
+*.sln   text eol=crlf
+*.csproj text eol=crlf
+*.bat   text eol=crlf
+*.cs    text
+*.csx   text
+*.xaml  text
+*.txt   text
+*.md    text
+
+# Binary files
+*.png binary
+*.ico binary
+*.rfa binary
+*.dwg binary
+*.xlsx binary

@@ -1,0 +1,168 @@
+using System;
+using System.Collections.Concurrent;
+using System.IO;
+using System.IO.Pipes;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using Autodesk.Revit.UI;
+
+namespace RevitBridge
+{
+    public class RunRequest
+    {
+        public string OutDir;
+        public byte[] Dll;
+        public StreamWriter Writer;
+        public readonly ManualResetEvent Done = new ManualResetEvent(false);
+        public volatile bool Cancelled;
+    }
+
+    // Runs on Revit's main thread (the only place where the Revit API may be used)
+    public class RunHandler : IExternalEventHandler
+    {
+        public readonly ConcurrentQueue<RunRequest> Queue = new ConcurrentQueue<RunRequest>();
+
+        public static void Send(RunRequest r, string line)
+        {
+            try { r.Writer.WriteLine(line.Replace("\r", "").Replace("\n", " | ")); }
+            catch { }
+        }
+
+        public void Execute(UIApplication app)
+        {
+            RunRequest req;
+            if (!Queue.TryDequeue(out req)) return;
+            if (req.Cancelled) { req.Done.Set(); return; }   // the client already gave up
+
+            try
+            {
+                if (app.ActiveUIDocument == null)
+                    throw new Exception("Open a Revit project first (there is no active document).");
+
+                Assembly asm = Assembly.Load(req.Dll);
+                Type type = asm.GetType("UserScript", true);
+                MethodInfo method = type.GetMethod("Run");
+                Action<string> log = s => Send(req, "LOG:" + s);
+
+                method.Invoke(null, new object[] { app, app.ActiveUIDocument.Document, req.OutDir, log });
+                Send(req, "DONE");
+            }
+            catch (TargetInvocationException ex)
+            {
+                Exception inner = ex.InnerException ?? ex;
+                Send(req, "ERROR:" + inner.GetType().Name + ": " + inner.Message);
+            }
+            catch (Exception ex)
+            {
+                Send(req, "ERROR:" + ex.GetType().Name + ": " + ex.Message);
+            }
+            finally
+            {
+                req.Done.Set();
+            }
+        }
+
+        public string GetName() { return "CAD Bridge run script"; }
+    }
+
+    public class BridgeApp : IExternalApplication
+    {
+        string _pipeName = "CadBridgeRevit";
+
+        RunHandler _handler;
+        ExternalEvent _event;
+        Thread _thread;
+        volatile bool _running;
+        string _version = "Revit";
+
+        public Result OnStartup(UIControlledApplication app)
+        {
+            _version = app.ControlledApplication.VersionName;
+            _pipeName = "CadBridgeRevit" + app.ControlledApplication.VersionNumber;   // one pipe per Revit year
+            _handler = new RunHandler();
+            _event = ExternalEvent.Create(_handler);
+            _running = true;
+            _thread = new Thread(ServerLoop) { IsBackground = true, Name = "CadBridge pipe" };
+            _thread.Start();
+            return Result.Succeeded;
+        }
+
+        public Result OnShutdown(UIControlledApplication app)
+        {
+            _running = false;
+            return Result.Succeeded;
+        }
+
+        [DllImport("user32.dll")]
+        static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+        static void Wake()
+        {
+            try
+            {
+                IntPtr h = System.Diagnostics.Process.GetCurrentProcess().MainWindowHandle;
+                if (h != IntPtr.Zero) PostMessage(h, 0, IntPtr.Zero, IntPtr.Zero);   // WM_NULL
+            }
+            catch { }
+        }
+
+        void ServerLoop()
+        {
+            while (_running)
+            {
+                try
+                {
+                    using (var pipe = new NamedPipeServerStream(_pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte))
+                    {
+                        pipe.WaitForConnection();
+                        var enc = new UTF8Encoding(false);
+                        var reader = new StreamReader(pipe, enc);
+                        var writer = new StreamWriter(pipe, enc) { AutoFlush = true };
+
+                        string cmd = reader.ReadLine();
+                        if (cmd == "PING")
+                        {
+                            writer.WriteLine("OK " + _version);
+                        }
+                        else if (cmd == "RUN")
+                        {
+                            string outDir = reader.ReadLine();
+                            string b64 = reader.ReadLine();
+                            var req = new RunRequest
+                            {
+                                OutDir = outDir,
+                                Dll = Convert.FromBase64String(b64),
+                                Writer = writer
+                            };
+
+                            _handler.Queue.Enqueue(req);
+                            _event.Raise();
+
+                            // Revit runs external events only when it is idle. While we wait, poke its main window
+                            // every 300 ms so it wakes up even when it is in the background.
+                            DateTime giveUp = DateTime.UtcNow.AddMinutes(2);
+                            while (!req.Done.WaitOne(300))
+                            {
+                                if (DateTime.UtcNow > giveUp)
+                                {
+                                    req.Cancelled = true;
+                                    RunHandler.Send(req, "ERROR:Revit did not respond. Is a dialog box open or a command running? Press Esc in Revit and try again.");
+                                    break;
+                                }
+                                Wake();
+                            }
+                        }
+
+                        try { pipe.WaitForPipeDrain(); } catch { }
+                    }
+                }
+                catch (Exception)
+                {
+                    Thread.Sleep(300);
+                }
+            }
+        }
+    }
+}

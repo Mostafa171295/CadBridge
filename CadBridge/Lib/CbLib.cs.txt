@@ -1,0 +1,629 @@
+// CAD Bridge shared library for Revit scripts (v5).
+// It is compiled together with every script that uses  Cb.  CbGrid  CbRow  CbXlsx  CbSheet  CbBoq.
+// Embedded in the program (Lib\CbLib.cs.txt) - you do not need to copy it anywhere.
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.IO.Compression;
+using System.Linq;
+using System.Text;
+using Autodesk.Revit.DB;
+
+// lets an operation (stairs...) finish when Revit only reports warnings
+public class CbWarningSwallower : IFailuresPreprocessor
+{
+    public FailureProcessingResult PreprocessFailures(FailuresAccessor fa)
+    {
+        foreach (FailureMessageAccessor m in fa.GetFailureMessages())
+            if (m.GetSeverity() == FailureSeverity.Warning) fa.DeleteWarning(m);
+        return FailureProcessingResult.Continue;
+    }
+}
+
+// one line of a quantity list (one element, or one group of elements)
+public class CbRow
+{
+    public string Id = "", Grp = "", Typ = "", Lvl = "", Note = "";
+    public double LvlElev;
+    public double Len, Area, Vol, Form, Rebar;          // metres, m2, m3, m2, kg
+    public double Width, Height;                        // millimetres (openings, wall thickness)
+    public double MinX, MaxX, MinY, MaxY, MinZ, MaxZ;   // feet (bounding box in the project)
+    public int Count = 1;
+}
+
+// the grid lines of the project, as made by 01_Grids
+public class CbGrid
+{
+    public List<Grid> V = new List<Grid>();     // lines that run along Y (numbered 1, 2, 3 ...)
+    public List<Grid> H = new List<Grid>();     // lines that run along X (lettered A, B, C ...)
+    public XYZ[,] Node;                         // Node[i, j] = crossing of horizontal grid i with vertical grid j
+    public int NV, NH;
+
+    public static CbGrid Read(Document doc)
+    {
+        CbGrid g = new CbGrid();
+        foreach (Grid gr in new FilteredElementCollector(doc).OfClass(typeof(Grid)).Cast<Grid>())
+        {
+            Line ln = gr.Curve as Line;
+            if (ln == null) continue;
+            if (Math.Abs(ln.Direction.Y) >= Math.Abs(ln.Direction.X)) g.V.Add(gr); else g.H.Add(gr);
+        }
+        if (g.V.Count < 2 || g.H.Count < 2)
+            throw new Exception("Need at least 2 vertical and 2 horizontal grids. Run 01_Grids first.");
+        g.V = g.V.OrderBy(q => ((Line)q.Curve).GetEndPoint(0).X).ToList();
+        g.H = g.H.OrderBy(q => ((Line)q.Curve).GetEndPoint(0).Y).ToList();
+        g.NV = g.V.Count; g.NH = g.H.Count;
+        g.Node = new XYZ[g.NH, g.NV];
+        for (int i = 0; i < g.NH; i++)
+            for (int j = 0; j < g.NV; j++)
+            {
+                g.Node[i, j] = Cross((Line)g.H[i].Curve, (Line)g.V[j].Curve);
+                if (g.Node[i, j] == null) throw new Exception("Grids " + g.H[i].Name + " and " + g.V[j].Name + " do not cross.");
+            }
+        return g;
+    }
+
+    public int IndexH(string name) { string n = (name ?? "").Trim(); return H.FindIndex(q => q.Name.Trim().Equals(n, StringComparison.OrdinalIgnoreCase)); }
+    public int IndexV(string name) { string n = (name ?? "").Trim(); return V.FindIndex(q => q.Name.Trim().Equals(n, StringComparison.OrdinalIgnoreCase)); }
+
+    // "B-2" (or "2-B") -> the crossing of grid B and grid 2, or null when a name is not found
+    public XYZ At(string spec)
+    {
+        string[] p = (spec ?? "").Split('-');
+        if (p.Length != 2) return null;
+        int i = IndexH(p[0]), j = IndexV(p[1]);
+        if (i < 0 || j < 0) { i = IndexH(p[1]); j = IndexV(p[0]); }
+        return (i < 0 || j < 0) ? null : Node[i, j];
+    }
+
+    // "A-B/1-2" -> the centre of the bay between grids A and B (letters) and 1 and 2 (numbers), or null
+    public XYZ BayCentre(string spec)
+    {
+        string[] p = (spec ?? "").Split('/');
+        if (p.Length != 2) return null;
+        string[] h = p[0].Split('-'), v = p[1].Split('-');
+        if (h.Length != 2 || v.Length != 2) return null;
+        int h0 = IndexH(h[0]), h1 = IndexH(h[1]), v0 = IndexV(v[0]), v1 = IndexV(v[1]);
+        if (h0 < 0 || h1 < 0 || v0 < 0 || v1 < 0) return null;
+        return new XYZ((Node[h0, v0].X + Node[h1, v1].X) / 2.0, (Node[h0, v0].Y + Node[h1, v1].Y) / 2.0, 0);
+    }
+
+    static XYZ Cross(Line la, Line lb)
+    {
+        XYZ p = la.GetEndPoint(0), r = la.Direction, q = lb.GetEndPoint(0), s = lb.Direction;
+        double den = r.X * s.Y - r.Y * s.X;
+        if (Math.Abs(den) < 1e-9) return null;
+        double tt = ((q.X - p.X) * s.Y - (q.Y - p.Y) * s.X) / den;
+        return new XYZ(p.X + tt * r.X, p.Y + tt * r.Y, 0);
+    }
+}
+
+public static class Cb
+{
+    // ---------------------------------------------------------------- units (Revit works in feet)
+    public static double M(double ft) { return ft * 0.3048; }
+    public static double M2(double ft2) { return ft2 * 0.09290304; }
+    public static double M3(double ft3) { return ft3 * 0.028316846592; }
+    public static double Mm(double ft) { return ft * 304.8; }
+    public static double Ft(double mm) { return mm / 304.8; }
+    public static string N(double v) { return v.ToString("0.###", CultureInfo.InvariantCulture); }
+    public static bool Yes(string s) { return (s ?? "").Trim().StartsWith("Y", StringComparison.OrdinalIgnoreCase); }
+    public static string[] Words(string csv)
+    {
+        return (csv ?? "").Split(new[] { ',', ';', '|' }, StringSplitOptions.RemoveEmptyEntries).Select(q => q.Trim()).Where(q => q.Length > 0).ToArray();
+    }
+
+    // ---------------------------------------------------------------- properties by name (API members that differ between Revit years)
+    public static bool SetProp(object o, string name, object value)
+    {
+        try
+        {
+            System.Reflection.PropertyInfo pi = o.GetType().GetProperty(name);
+            if (pi == null || !pi.CanWrite) return false;
+            pi.SetValue(o, Convert.ChangeType(value, pi.PropertyType, CultureInfo.InvariantCulture), null);
+            return true;
+        }
+        catch { return false; }
+    }
+    public static object GetProp(object o, string name)
+    {
+        try
+        {
+            System.Reflection.PropertyInfo pi = o.GetType().GetProperty(name);
+            return pi == null ? null : pi.GetValue(o, null);
+        }
+        catch { return null; }
+    }
+    public static double GetNum(object o, string name)
+    {
+        object v = GetProp(o, name);
+        if (v == null) return 0;
+        try { return Convert.ToDouble(v, CultureInfo.InvariantCulture); } catch { return 0; }
+    }
+
+    // ---------------------------------------------------------------- parameters
+    public static double Dbl(Parameter p)
+    {
+        if (p == null || !p.HasValue) return 0;
+        if (p.StorageType == StorageType.Double) return p.AsDouble();
+        if (p.StorageType == StorageType.Integer) return p.AsInteger();
+        return 0;
+    }
+    public static double Dbl(Element e, BuiltInParameter bip) { return e == null ? 0 : Dbl(e.get_Parameter(bip)); }
+    public static string Txt(Element e, BuiltInParameter bip)
+    {
+        if (e == null) return "";
+        Parameter p = e.get_Parameter(bip);
+        if (p == null || !p.HasValue) return "";
+        if (p.StorageType == StorageType.String) return p.AsString() ?? "";
+        return p.AsValueString() ?? "";
+    }
+    public static Parameter Find(Element e, params string[] names)
+    {
+        if (e == null) return null;
+        foreach (string n in names) { Parameter p = e.LookupParameter(n); if (p != null) return p; }
+        return null;
+    }
+
+    // ---------------------------------------------------------------- elements
+    public static List<Level> Levels(Document doc)
+    {
+        return new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().OrderBy(q => q.Elevation).ToList();
+    }
+
+    public static ElementType TypeOf(Document doc, Element e)
+    {
+        ElementId id = e.GetTypeId();
+        if (id == null || id.Equals(ElementId.InvalidElementId)) return null;
+        return doc.GetElement(id) as ElementType;
+    }
+
+    // "Family : Type"  (for system families: "Basic Wall : Generic - 200mm")
+    public static string TypeName(Document doc, Element e)
+    {
+        ElementType t = TypeOf(doc, e);
+        if (t == null) return e.Name;
+        string fam = t.FamilyName;
+        return string.IsNullOrEmpty(fam) ? t.Name : fam + " : " + t.Name;
+    }
+
+    // the level an element belongs to (columns: base level, beams: reference level, walls and floors: their level)
+    public static Level LevelOf(Document doc, Element e)
+    {
+        BuiltInParameter[] tries = { BuiltInParameter.FAMILY_BASE_LEVEL_PARAM, BuiltInParameter.INSTANCE_REFERENCE_LEVEL_PARAM, BuiltInParameter.WALL_BASE_CONSTRAINT };
+        ElementId id = e.LevelId;
+        if (id == null || id.Equals(ElementId.InvalidElementId))
+        {
+            foreach (BuiltInParameter bip in tries)
+            {
+                Parameter p = e.get_Parameter(bip);
+                if (p != null && p.HasValue && p.StorageType == StorageType.ElementId) { id = p.AsElementId(); break; }
+            }
+        }
+        if (id == null || id.Equals(ElementId.InvalidElementId)) return null;
+        return doc.GetElement(id) as Level;
+    }
+
+    // structural columns / beams / footings: steel and timber are not concrete
+    public static bool IsConcrete(FamilyInstance fi)
+    {
+        try
+        {
+            Autodesk.Revit.DB.Structure.StructuralMaterialType mt = fi.StructuralMaterialType;
+            return mt != Autodesk.Revit.DB.Structure.StructuralMaterialType.Steel &&
+                   mt != Autodesk.Revit.DB.Structure.StructuralMaterialType.Wood;
+        }
+        catch { return true; }
+    }
+
+    // a wall is reinforced concrete when it is bearing / shear, or its type name contains one of the words
+    public static bool IsRcWall(Document doc, Wall w, string[] words)
+    {
+        Parameter pu = w.get_Parameter(BuiltInParameter.WALL_STRUCTURAL_USAGE_PARAM);
+        if (pu != null && pu.HasValue && pu.StorageType == StorageType.Integer && pu.AsInteger() > 0) return true;
+        string name = TypeName(doc, w).ToLowerInvariant();
+        foreach (string k in words) if (k.Length > 0 && name.Contains(k.ToLowerInvariant())) return true;
+        return false;
+    }
+
+    // width / height of a door or window in feet (instance first, then the type)
+    public static double OpenSize(Document doc, FamilyInstance fi, bool width)
+    {
+        string[] names = width ? new[] { "Width", "Rough Width" } : new[] { "Height", "Rough Height" };
+        BuiltInParameter bip = width ? BuiltInParameter.FAMILY_WIDTH_PARAM : BuiltInParameter.FAMILY_HEIGHT_PARAM;
+        Element sym = doc.GetElement(fi.GetTypeId());
+        double v = Dbl(fi, bip); if (v > 0) return v;
+        v = Dbl(sym, bip); if (v > 0) return v;
+        foreach (string n in names)
+        {
+            v = Dbl(Find(fi, n)); if (v > 0) return v;
+            v = Dbl(Find(sym, n)); if (v > 0) return v;
+        }
+        return 0;
+    }
+
+    // ---------------------------------------------------------------- geometry
+    public static List<Solid> Solids(Element e)
+    {
+        List<Solid> list = new List<Solid>();
+        Options opt = new Options();
+        opt.DetailLevel = ViewDetailLevel.Fine;
+        opt.ComputeReferences = false;
+        opt.IncludeNonVisibleObjects = false;
+        GeometryElement ge = null;
+        try { ge = e.get_Geometry(opt); } catch { }
+        if (ge != null) Collect(ge, list);
+        return list;
+    }
+
+    static void Collect(GeometryElement ge, List<Solid> list)
+    {
+        foreach (GeometryObject go in ge)
+        {
+            Solid s = go as Solid;
+            if (s != null) { if (s.Volume > 1e-9 && s.Faces.Size > 0) list.Add(s); continue; }
+            GeometryInstance gi = go as GeometryInstance;
+            if (gi != null) { GeometryElement inst = gi.GetInstanceGeometry(); if (inst != null) Collect(inst, list); continue; }
+            GeometryElement sub = go as GeometryElement;
+            if (sub != null) Collect(sub, list);
+        }
+    }
+
+    // Formwork area in ft2 = the faces that touch fresh concrete.
+    //   column / footing / wall : side faces only (tops and bottoms are not shuttered)
+    //   beam                    : sides + soffit (the top is under the slab; faces along the beam axis sit on columns)
+    //   slab                    : soffit + edges (the top is poured level)
+    public static double FormworkFt2(List<Solid> solids, string kind, XYZ axis)
+    {
+        double sum = 0;
+        foreach (Solid s in solids)
+            foreach (Face f in s.Faces)
+            {
+                PlanarFace pf = f as PlanarFace;
+                if (pf != null)
+                {
+                    double nz = pf.FaceNormal.Z;
+                    if (nz > 0.7) continue;
+                    if (nz < -0.7 && (kind == "column" || kind == "footing" || kind == "wall")) continue;
+                    if (kind == "beam" && axis != null && Math.Abs(pf.FaceNormal.DotProduct(axis)) > 0.95) continue;
+                }
+                sum += f.Area;
+            }
+        return sum;
+    }
+}
+
+// ====================================================================================================
+//  Excel (.xlsx) writer - no Excel needed, written straight into the zip package
+// ====================================================================================================
+public class CbCell { public object V; public string F; public int S; }
+
+public class CbSheet
+{
+    public string Name;
+    public bool Rtl;
+    public int FreezeRow;               // rows 1..FreezeRow stay visible when scrolling (0 = none)
+    public string AutoFilter = "";      // for example "A4:J120"
+    readonly SortedDictionary<int, SortedDictionary<int, CbCell>> rows = new SortedDictionary<int, SortedDictionary<int, CbCell>>();
+    readonly SortedDictionary<int, double> widths = new SortedDictionary<int, double>();
+    readonly List<string> merges = new List<string>();
+
+    public CbSheet(string name) { Name = name; }
+
+    void Put(int r, int c, CbCell cell)
+    {
+        SortedDictionary<int, CbCell> row;
+        if (!rows.TryGetValue(r, out row)) { row = new SortedDictionary<int, CbCell>(); rows[r] = row; }
+        row[c] = cell;
+    }
+    // value = string (text), number, or null (empty but styled cell)
+    public void Set(int r, int c, object value, int style) { Put(r, c, new CbCell { V = value, S = style }); }
+    // formula without the leading "=" ; cached = the value to show before Excel recalculates
+    public void Formula(int r, int c, string formula, double cached, int style) { Put(r, c, new CbCell { F = formula, V = cached, S = style }); }
+    public void Width(int c, double w) { widths[c] = w; }
+    public void Merge(string range) { merges.Add(range); }
+    public int LastRow { get { return rows.Count == 0 ? 0 : rows.Keys.Max(); } }
+
+    internal string ToXml(bool selected)
+    {
+        StringBuilder sb = new StringBuilder();
+        sb.Append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+        sb.Append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">");
+        sb.Append("<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr>");
+        sb.Append("<sheetViews><sheetView workbookViewId=\"0\"");
+        if (selected) sb.Append(" tabSelected=\"1\"");
+        if (Rtl) sb.Append(" rightToLeft=\"1\"");
+        sb.Append(">");
+        if (FreezeRow > 0)
+        {
+            int tl = FreezeRow + 1;
+            sb.Append("<pane ySplit=\"" + FreezeRow + "\" topLeftCell=\"A" + tl + "\" activePane=\"bottomLeft\" state=\"frozen\"/>");
+            sb.Append("<selection pane=\"bottomLeft\" activeCell=\"A" + tl + "\" sqref=\"A" + tl + "\"/>");
+        }
+        sb.Append("</sheetView></sheetViews>");
+        sb.Append("<sheetFormatPr defaultRowHeight=\"15\"/>");
+        if (widths.Count > 0)
+        {
+            sb.Append("<cols>");
+            foreach (KeyValuePair<int, double> kv in widths)
+                sb.Append("<col min=\"" + kv.Key + "\" max=\"" + kv.Key + "\" width=\"" + CbXlsx.Num(kv.Value) + "\" customWidth=\"1\"/>");
+            sb.Append("</cols>");
+        }
+        sb.Append("<sheetData>");
+        foreach (KeyValuePair<int, SortedDictionary<int, CbCell>> rk in rows)
+        {
+            sb.Append("<row r=\"" + rk.Key + "\">");
+            foreach (KeyValuePair<int, CbCell> ck in rk.Value)
+            {
+                CbCell cell = ck.Value;
+                string refr = CbXlsx.Col(ck.Key) + rk.Key;
+                sb.Append("<c r=\"" + refr + "\" s=\"" + cell.S + "\"");
+                if (cell.F != null)
+                    sb.Append("><f>" + CbXlsx.Esc(cell.F) + "</f><v>" + CbXlsx.Num(Convert.ToDouble(cell.V)) + "</v></c>");
+                else if (cell.V == null)
+                    sb.Append("/>");
+                else if (cell.V is string)
+                    sb.Append(" t=\"inlineStr\"><is><t xml:space=\"preserve\">" + CbXlsx.Esc((string)cell.V) + "</t></is></c>");
+                else
+                    sb.Append("><v>" + CbXlsx.Num(Convert.ToDouble(cell.V)) + "</v></c>");
+            }
+            sb.Append("</row>");
+        }
+        sb.Append("</sheetData>");
+        if (!string.IsNullOrEmpty(AutoFilter)) sb.Append("<autoFilter ref=\"" + AutoFilter + "\"/>");
+        if (merges.Count > 0)
+        {
+            sb.Append("<mergeCells count=\"" + merges.Count + "\">");
+            foreach (string m in merges) sb.Append("<mergeCell ref=\"" + m + "\"/>");
+            sb.Append("</mergeCells>");
+        }
+        sb.Append("<pageMargins left=\"0.5\" right=\"0.5\" top=\"0.6\" bottom=\"0.6\" header=\"0.3\" footer=\"0.3\"/>");
+        sb.Append("<pageSetup paperSize=\"9\" orientation=\"landscape\" fitToWidth=\"1\" fitToHeight=\"0\"/>");
+        sb.Append("</worksheet>");
+        return sb.ToString();
+    }
+}
+
+public static class CbXlsx
+{
+    // cell styles (index into cellXfs of StylesXml)
+    public const int S_DEF = 0, S_TITLE = 1, S_HEAD = 2, S_TEXT = 3, S_NUM = 4, S_INT = 5, S_TOTL = 6, S_TOTN = 7,
+                     S_SECT = 8, S_RATE = 9, S_MONEY = 10, S_NOTE = 11, S_CTR = 12, S_TOTI = 13;
+
+    const string StylesXml = @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
+<styleSheet xmlns=""http://schemas.openxmlformats.org/spreadsheetml/2006/main"">
+<fonts count=""5"">
+<font><sz val=""11""/><name val=""Calibri""/></font>
+<font><b/><sz val=""11""/><name val=""Calibri""/></font>
+<font><b/><sz val=""14""/><color rgb=""FF1F3864""/><name val=""Calibri""/></font>
+<font><b/><sz val=""11""/><color rgb=""FFFFFFFF""/><name val=""Calibri""/></font>
+<font><i/><sz val=""10""/><color rgb=""FF595959""/><name val=""Calibri""/></font>
+</fonts>
+<fills count=""6"">
+<fill><patternFill patternType=""none""/></fill>
+<fill><patternFill patternType=""gray125""/></fill>
+<fill><patternFill patternType=""solid""><fgColor rgb=""FF1F3864""/><bgColor indexed=""64""/></patternFill></fill>
+<fill><patternFill patternType=""solid""><fgColor rgb=""FFD9E2F3""/><bgColor indexed=""64""/></patternFill></fill>
+<fill><patternFill patternType=""solid""><fgColor rgb=""FFF2F2F2""/><bgColor indexed=""64""/></patternFill></fill>
+<fill><patternFill patternType=""solid""><fgColor rgb=""FFFFF2CC""/><bgColor indexed=""64""/></patternFill></fill>
+</fills>
+<borders count=""2"">
+<border><left/><right/><top/><bottom/><diagonal/></border>
+<border><left style=""thin""><color rgb=""FFA6A6A6""/></left><right style=""thin""><color rgb=""FFA6A6A6""/></right><top style=""thin""><color rgb=""FFA6A6A6""/></top><bottom style=""thin""><color rgb=""FFA6A6A6""/></bottom><diagonal/></border>
+</borders>
+<cellStyleXfs count=""1""><xf numFmtId=""0"" fontId=""0"" fillId=""0"" borderId=""0""/></cellStyleXfs>
+<cellXfs count=""14"">
+<xf numFmtId=""0"" fontId=""0"" fillId=""0"" borderId=""0"" xfId=""0""/>
+<xf numFmtId=""0"" fontId=""2"" fillId=""0"" borderId=""0"" xfId=""0"" applyFont=""1""/>
+<xf numFmtId=""0"" fontId=""3"" fillId=""2"" borderId=""1"" xfId=""0"" applyFont=""1"" applyFill=""1"" applyBorder=""1"" applyAlignment=""1""><alignment horizontal=""center"" vertical=""center"" wrapText=""1""/></xf>
+<xf numFmtId=""0"" fontId=""0"" fillId=""0"" borderId=""1"" xfId=""0"" applyBorder=""1"" applyAlignment=""1""><alignment vertical=""top"" wrapText=""1""/></xf>
+<xf numFmtId=""2"" fontId=""0"" fillId=""0"" borderId=""1"" xfId=""0"" applyNumberFormat=""1"" applyBorder=""1""/>
+<xf numFmtId=""1"" fontId=""0"" fillId=""0"" borderId=""1"" xfId=""0"" applyNumberFormat=""1"" applyBorder=""1""/>
+<xf numFmtId=""0"" fontId=""1"" fillId=""4"" borderId=""1"" xfId=""0"" applyFont=""1"" applyFill=""1"" applyBorder=""1""/>
+<xf numFmtId=""4"" fontId=""1"" fillId=""4"" borderId=""1"" xfId=""0"" applyNumberFormat=""1"" applyFont=""1"" applyFill=""1"" applyBorder=""1""/>
+<xf numFmtId=""0"" fontId=""1"" fillId=""3"" borderId=""1"" xfId=""0"" applyFont=""1"" applyFill=""1"" applyBorder=""1""/>
+<xf numFmtId=""4"" fontId=""0"" fillId=""5"" borderId=""1"" xfId=""0"" applyNumberFormat=""1"" applyFill=""1"" applyBorder=""1""/>
+<xf numFmtId=""4"" fontId=""0"" fillId=""0"" borderId=""1"" xfId=""0"" applyNumberFormat=""1"" applyBorder=""1""/>
+<xf numFmtId=""0"" fontId=""4"" fillId=""0"" borderId=""0"" xfId=""0"" applyFont=""1""/>
+<xf numFmtId=""0"" fontId=""0"" fillId=""0"" borderId=""1"" xfId=""0"" applyBorder=""1"" applyAlignment=""1""><alignment horizontal=""center"" vertical=""top""/></xf>
+<xf numFmtId=""3"" fontId=""1"" fillId=""4"" borderId=""1"" xfId=""0"" applyNumberFormat=""1"" applyFont=""1"" applyFill=""1"" applyBorder=""1""/>
+</cellXfs>
+<cellStyles count=""1""><cellStyle name=""Normal"" xfId=""0"" builtinId=""0""/></cellStyles>
+</styleSheet>";
+
+    public static string Esc(string s)
+    {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder(s.Length + 8);
+        foreach (char ch in s)
+        {
+            if (ch == '&') sb.Append("&amp;");
+            else if (ch == '<') sb.Append("&lt;");
+            else if (ch == '>') sb.Append("&gt;");
+            else if (ch == '"') sb.Append("&quot;");
+            else if (ch < 32 && ch != 9 && ch != 10 && ch != 13) continue;
+            else sb.Append(ch);
+        }
+        return sb.ToString();
+    }
+
+    public static string Num(double v)
+    {
+        if (double.IsNaN(v) || double.IsInfinity(v)) v = 0;
+        return v.ToString("R", CultureInfo.InvariantCulture);
+    }
+
+    public static string Col(int c)
+    {
+        string s = "";
+        while (c > 0) { int m = (c - 1) % 26; s = ((char)('A' + m)).ToString() + s; c = (c - 1) / 26; }
+        return s;
+    }
+
+    static string SafeName(string n)
+    {
+        StringBuilder sb = new StringBuilder();
+        foreach (char ch in n ?? "Sheet") if ("[]:*?/\\".IndexOf(ch) < 0) sb.Append(ch);
+        string r = sb.ToString().Trim();
+        if (r.Length == 0) r = "Sheet";
+        return r.Length > 31 ? r.Substring(0, 31) : r;
+    }
+
+    // a sheet with a title (row 1), a sub-title (row 2) and a header row (row 4, frozen)
+    public static CbSheet Table(string name, string title, string subtitle, string[] heads, double[] widths)
+    {
+        CbSheet sh = new CbSheet(name);
+        sh.Set(1, 1, title, S_TITLE);
+        sh.Set(2, 1, subtitle, S_NOTE);
+        for (int k = 0; k < heads.Length; k++)
+        {
+            sh.Set(4, k + 1, heads[k], S_HEAD);
+            if (k < widths.Length) sh.Width(k + 1, widths[k]);
+        }
+        sh.FreezeRow = 4;
+        return sh;
+    }
+
+    // a sheet with one wide column of text lines (assumptions, warnings...)
+    public static CbSheet Notes(string name, string title, List<string> lines)
+    {
+        CbSheet sh = new CbSheet(name);
+        sh.Width(1, 130);
+        sh.Set(1, 1, title, S_TITLE);
+        int r = 3;
+        foreach (string ln in lines)
+        {
+            bool head = ln.StartsWith("#");
+            sh.Set(r, 1, head ? ln.TrimStart('#', ' ') : ln, head ? S_SECT : S_TEXT);
+            r++;
+        }
+        return sh;
+    }
+
+    public static void Save(string path, List<CbSheet> sheets)
+    {
+        if (File.Exists(path)) File.Delete(path);
+        using (FileStream fs = new FileStream(path, FileMode.Create))
+        using (ZipArchive zip = new ZipArchive(fs, ZipArchiveMode.Create))
+        {
+            StringBuilder ct = new StringBuilder();
+            ct.Append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+            ct.Append("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">");
+            ct.Append("<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>");
+            ct.Append("<Default Extension=\"xml\" ContentType=\"application/xml\"/>");
+            ct.Append("<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>");
+            ct.Append("<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>");
+            for (int i = 1; i <= sheets.Count; i++)
+                ct.Append("<Override PartName=\"/xl/worksheets/sheet" + i + ".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>");
+            ct.Append("</Types>");
+            AddEntry(zip, "[Content_Types].xml", ct.ToString());
+
+            AddEntry(zip, "_rels/.rels",
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
+                "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>" +
+                "</Relationships>");
+
+            StringBuilder wb = new StringBuilder();
+            wb.Append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+            wb.Append("<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">");
+            wb.Append("<bookViews><workbookView/></bookViews><sheets>");
+            for (int i = 0; i < sheets.Count; i++)
+                wb.Append("<sheet name=\"" + Esc(SafeName(sheets[i].Name)) + "\" sheetId=\"" + (i + 1) + "\" r:id=\"rId" + (i + 1) + "\"/>");
+            wb.Append("</sheets><calcPr calcId=\"191029\" fullCalcOnLoad=\"1\"/></workbook>");
+            AddEntry(zip, "xl/workbook.xml", wb.ToString());
+
+            StringBuilder rel = new StringBuilder();
+            rel.Append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+            rel.Append("<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">");
+            for (int i = 1; i <= sheets.Count; i++)
+                rel.Append("<Relationship Id=\"rId" + i + "\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet" + i + ".xml\"/>");
+            rel.Append("<Relationship Id=\"rId" + (sheets.Count + 1) + "\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>");
+            rel.Append("</Relationships>");
+            AddEntry(zip, "xl/_rels/workbook.xml.rels", rel.ToString());
+
+            AddEntry(zip, "xl/styles.xml", StylesXml);
+            for (int i = 0; i < sheets.Count; i++)
+                AddEntry(zip, "xl/worksheets/sheet" + (i + 1) + ".xml", sheets[i].ToXml(i == 0));
+        }
+    }
+
+    static void AddEntry(ZipArchive zip, string name, string content)
+    {
+        ZipArchiveEntry en = zip.CreateEntry(name);
+        byte[] bytes = new UTF8Encoding(false).GetBytes(content);
+        using (Stream st = en.Open()) st.Write(bytes, 0, bytes.Length);
+    }
+}
+
+// ====================================================================================================
+//  Bill of quantities sheet: sections, items, sub-totals, grand total (rates are typed in the yellow cells)
+// ====================================================================================================
+public class CbBoq
+{
+    public CbSheet Sheet;
+    int row = 5, secNo = 0, itemNo = 0, secFirst = 5;
+    readonly List<int> subs = new List<int>();
+
+    public CbBoq(string title, string subtitle)
+    {
+        Sheet = new CbSheet("BOQ");
+        Sheet.Set(1, 1, title, CbXlsx.S_TITLE);
+        Sheet.Set(2, 1, subtitle, CbXlsx.S_NOTE);
+        string[] heads = { "Item\nبند", "Description", "الوصف", "Unit\nالوحدة", "Quantity\nالكمية", "Rate\nالسعر", "Amount\nالإجمالي", "Notes / basis of measurement" };
+        double[] w = { 8, 48, 38, 9, 14, 12, 16, 56 };
+        for (int k = 0; k < heads.Length; k++) { Sheet.Set(4, k + 1, heads[k], CbXlsx.S_HEAD); Sheet.Width(k + 1, w[k]); }
+        Sheet.FreezeRow = 4;
+    }
+
+    public void Section(string en, string ar)
+    {
+        secNo++; itemNo = 0;
+        Sheet.Set(row, 1, secNo.ToString(), CbXlsx.S_SECT);
+        Sheet.Set(row, 2, en, CbXlsx.S_SECT);
+        Sheet.Set(row, 3, ar, CbXlsx.S_SECT);
+        for (int k = 4; k <= 8; k++) Sheet.Set(row, k, null, CbXlsx.S_SECT);
+        row++; secFirst = row;
+    }
+
+    // qtyFormula = null -> the quantity is written as a number; otherwise as a live formula (qty = the value shown before recalculation)
+    public int Item(string en, string ar, string unit, double qty, string qtyFormula, string note)
+    {
+        itemNo++;
+        Sheet.Set(row, 1, secNo + "." + itemNo, CbXlsx.S_CTR);
+        Sheet.Set(row, 2, en, CbXlsx.S_TEXT);
+        Sheet.Set(row, 3, ar, CbXlsx.S_TEXT);
+        Sheet.Set(row, 4, unit, CbXlsx.S_CTR);
+        if (qtyFormula != null) Sheet.Formula(row, 5, qtyFormula, qty, CbXlsx.S_NUM); else Sheet.Set(row, 5, qty, CbXlsx.S_NUM);
+        Sheet.Set(row, 6, null, CbXlsx.S_RATE);
+        Sheet.Formula(row, 7, "E" + row + "*F" + row, 0, CbXlsx.S_MONEY);
+        Sheet.Set(row, 8, note ?? "", CbXlsx.S_TEXT);
+        row++;
+        return row - 1;
+    }
+
+    public void EndSection()
+    {
+        if (row == secFirst) { row--; secNo--; return; }   // empty section: remove its title row
+        Sheet.Set(row, 1, null, CbXlsx.S_TOTL);
+        Sheet.Set(row, 2, "Sub-total", CbXlsx.S_TOTL);
+        Sheet.Set(row, 3, "الإجمالي الفرعي", CbXlsx.S_TOTL);
+        for (int k = 4; k <= 6; k++) Sheet.Set(row, k, null, CbXlsx.S_TOTL);
+        Sheet.Formula(row, 7, "SUM(G" + secFirst + ":G" + (row - 1) + ")", 0, CbXlsx.S_TOTN);
+        Sheet.Set(row, 8, null, CbXlsx.S_TOTL);
+        subs.Add(row);
+        row += 2;
+    }
+
+    public void Finish()
+    {
+        Sheet.Set(row, 1, null, CbXlsx.S_TOTL);
+        Sheet.Set(row, 2, "TOTAL", CbXlsx.S_TOTL);
+        Sheet.Set(row, 3, "الإجمالي العام", CbXlsx.S_TOTL);
+        for (int k = 4; k <= 6; k++) Sheet.Set(row, k, null, CbXlsx.S_TOTL);
+        string f = subs.Count == 0 ? "0" : string.Join("+", subs.Select(q => "G" + q).ToArray());
+        Sheet.Formula(row, 7, f, 0, CbXlsx.S_TOTN);
+        Sheet.Set(row, 8, "Type the unit rates in the yellow cells - the amounts and totals are calculated by Excel.", CbXlsx.S_NOTE);
+    }
+}

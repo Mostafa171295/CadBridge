@@ -1,0 +1,41 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+publish/
+*.exe
+*.dll
+*.pdb
+
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userprefs
+*.DotSettings.user
+*.rsuser
+launchSettings.json
+TestResults/
+
+# NuGet
+packages/
+*.nupkg
+*.snupkg
+project.lock.json
+
+# Generated files
+*.log
+*.tmp
+~$*
+Thumbs.db
+.DS_Store
+
+# Packaged builds
+*.zip
+*.7z
+*.rar

@@ -1,0 +1,129 @@
+<Window x:Class="CadBridge.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:CadBridge"
+        Title="CAD Bridge" Height="860" Width="1200" MinHeight="520" MinWidth="760"
+        Background="{DynamicResource BgBrush}" Foreground="{DynamicResource TextBrush}"
+        FontFamily="Segoe UI" FontSize="13" WindowStartupLocation="CenterScreen">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- header + connection chips (green dot = connected) -->
+        <Border Grid.Row="0" Background="{DynamicResource HeaderBrush}" Padding="22,14"
+                Panel.ZIndex="2" Effect="{DynamicResource HeaderGlow}">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border CornerRadius="14" Background="{DynamicResource ChipBrush}" BorderBrush="{DynamicResource ChipLineBrush}" BorderThickness="1" Padding="12,5" Margin="8,0,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="SwDot" Width="9" Height="9" Fill="#6B7280" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="SwStatus" Text="SolidWorks" Foreground="{DynamicResource ChipTextBrush}" Margin="8,0,0,0" FontSize="12"/>
+                        </StackPanel>
+                    </Border>
+                    <Border CornerRadius="14" Background="{DynamicResource ChipBrush}" BorderBrush="{DynamicResource ChipLineBrush}" BorderThickness="1" Padding="12,5" Margin="8,0,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="AcDot" Width="9" Height="9" Fill="#6B7280" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="AcStatus" Text="AutoCAD" Foreground="{DynamicResource ChipTextBrush}" Margin="8,0,0,0" FontSize="12"/>
+                        </StackPanel>
+                    </Border>
+                    <Border CornerRadius="14" Background="{DynamicResource ChipBrush}" BorderBrush="{DynamicResource ChipLineBrush}" BorderThickness="1" Padding="12,5" Margin="8,0,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="CvDot" Width="9" Height="9" Fill="#6B7280" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="CvStatus" Text="Civil 3D" Foreground="{DynamicResource ChipTextBrush}" Margin="8,0,0,0" FontSize="12"/>
+                        </StackPanel>
+                    </Border>
+                    <Border CornerRadius="14" Background="{DynamicResource ChipBrush}" BorderBrush="{DynamicResource ChipLineBrush}" BorderThickness="1" Padding="12,5" Margin="8,0,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="RvDot" Width="9" Height="9" Fill="#6B7280" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="RvStatus" Text="Revit" Foreground="{DynamicResource ChipTextBrush}" Margin="8,0,0,0" FontSize="12"/>
+                        </StackPanel>
+                    </Border>
+                    <ToggleButton x:Name="ThemeToggle" Style="{StaticResource ThemeToggle}" Margin="18,0,0,0"
+                                  ToolTip="Night mode" Checked="Theme_Toggled" Unchecked="Theme_Toggled"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Border Width="38" Height="38" CornerRadius="10" Background="{DynamicResource AccentGradientBrush}"
+                            Margin="0,0,14,0" VerticalAlignment="Center">
+                        <Border.Effect>
+                            <DropShadowEffect Color="#8DBBFF" BlurRadius="16" ShadowDepth="0" Opacity="0.9"/>
+                        </Border.Effect>
+                        <TextBlock Text="CB" Foreground="White" FontWeight="Bold" FontSize="15"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="CAD Bridge" Foreground="White" FontSize="20" FontWeight="SemiBold">
+                            <TextBlock.Effect>
+                                <DropShadowEffect Color="#8DBBFF" BlurRadius="14" ShadowDepth="0" Opacity="0.75"/>
+                            </TextBlock.Effect>
+                        </TextBlock>
+                        <TextBlock Text="Pick a script, set the values, press Run: it is executed inside your CAD program"
+                                   Foreground="{DynamicResource HeaderSubBrush}" FontSize="12" Margin="0,2,0,0"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- project bar -->
+        <Border Grid.Row="1" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource LineBrush}"
+                BorderThickness="0,0,0,1" Padding="22,12">
+            <WrapPanel>
+                <TextBlock Text="Project" VerticalAlignment="Center"
+                           Foreground="{DynamicResource MutedBrush}" Margin="0,0,8,0"/>
+                <ComboBox x:Name="ProjectBox" Width="230" Height="34" VerticalContentAlignment="Center"
+                          SelectionChanged="Project_Changed"/>
+                <Button Content="New project" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0"
+                        Click="NewProject_Click"/>
+                <Button Content="Open files folder" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0"
+                        Click="OpenFolder_Click"/>
+                <TextBlock Text="Assembly name (SolidWorks, Build assembly button)" VerticalAlignment="Center"
+                           Foreground="{DynamicResource MutedBrush}" Margin="28,0,8,0"/>
+                <TextBox x:Name="AsmNameBox" Style="{StaticResource FieldBox}" Width="140" Text="Assembly1"/>
+            </WrapPanel>
+        </Border>
+
+        <TabControl Grid.Row="2" Margin="22,12,22,0">
+            <TabItem Header="SolidWorks">
+                <local:CadTabView x:Name="SwView"/>
+            </TabItem>
+            <TabItem Header="AutoCAD">
+                <local:CadTabView x:Name="AcadView"/>
+            </TabItem>
+            <TabItem Header="Civil 3D">
+                <local:CadTabView x:Name="CivilView"/>
+            </TabItem>
+            <TabItem Header="Revit">
+                <local:CadTabView x:Name="RvView"/>
+            </TabItem>
+        </TabControl>
+
+        <Grid Grid.Row="3" Margin="22,8,22,12" Height="110">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <DockPanel Margin="0,0,0,6">
+                <Button DockPanel.Dock="Right" Content="Clear" Height="26" Padding="12,0"
+                        Style="{StaticResource SecondaryButton}" Click="ClearLog_Click"/>
+                <TextBlock Text="Activity log" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            </DockPanel>
+            <Border Grid.Row="1" CornerRadius="6" Background="{DynamicResource SurfaceBrush}"
+                    Effect="{DynamicResource CardGlow}"/>
+            <RichTextBox x:Name="LogBox" Grid.Row="1" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
+                         VerticalScrollBarVisibility="Auto" Background="{DynamicResource SurfaceBrush}"
+                         Foreground="{DynamicResource TextBrush}"
+                         BorderBrush="{DynamicResource LineBrush}" Padding="6">
+                <RichTextBox.Resources>
+                    <Style TargetType="Paragraph">
+                        <Setter Property="Margin" Value="0"/>
+                    </Style>
+                </RichTextBox.Resources>
+                <FlowDocument/>
+            </RichTextBox>
+        </Grid>
+    </Grid>
+</Window>

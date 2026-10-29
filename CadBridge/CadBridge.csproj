@@ -1,0 +1,67 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <LangVersion>latest</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>CadBridge</RootNamespace>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="4.8.0" />
+    <PackageReference Include="AvalonEdit" Version="6.3.0.90" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+
+  <!-- SolidWorks is OPTIONAL.
+       If the two SolidWorks interop DLLs are found, SolidWorks support is built in (symbol HAS_SOLIDWORKS).
+       If not, the program still builds and the SolidWorks tab stays visible, but Connect says that
+       this build has no SolidWorks support. Revit / AutoCAD / Civil 3D are not affected.
+       Different install folder?  Change the path below or build with:
+           msbuild /p:SolidWorksApiDir="D:\SW\api\redist" -->
+  <PropertyGroup>
+    <SolidWorksApiDir Condition="'$(SolidWorksApiDir)' == ''">C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist</SolidWorksApiDir>
+    <HasSolidWorks Condition="Exists('$(SolidWorksApiDir)\SolidWorks.Interop.sldworks.dll') And Exists('$(SolidWorksApiDir)\SolidWorks.Interop.swconst.dll')">true</HasSolidWorks>
+    <DefineConstants Condition="'$(HasSolidWorks)' == 'true'">$(DefineConstants);HAS_SOLIDWORKS</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(HasSolidWorks)' == 'true'">
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>$(SolidWorksApiDir)\SolidWorks.Interop.sldworks.dll</HintPath>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swconst">
+      <HintPath>$(SolidWorksApiDir)\SolidWorks.Interop.swconst.dll</HintPath>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+      <Private>True</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="WarnNoSolidWorks" BeforeTargets="CoreCompile" Condition="'$(HasSolidWorks)' != 'true'">
+    <Message Importance="high" Text="CadBridge: SolidWorks DLLs not found in '$(SolidWorksApiDir)' - building WITHOUT SolidWorks support." />
+  </Target>
+
+  <!-- shared library for Revit scripts (Excel writer, quantity helpers) - embedded in the .exe -->
+  <ItemGroup>
+    <EmbeddedResource Include="Lib\CbLib.cs.txt" LogicalName="CbLib.cs.txt" />
+    <None Update="Lib\CbLib.cs.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- example scripts, copied next to the .exe (Scripts\SolidWorks, Scripts\AutoCAD, ...) -->
+  <ItemGroup>
+    <None Update="Scripts\**\*.csx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

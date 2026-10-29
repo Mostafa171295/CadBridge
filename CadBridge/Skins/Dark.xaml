@@ -1,0 +1,57 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ===== DARK / NIGHT: deep navy with neon blue glow ===== -->
+
+    <LinearGradientBrush x:Key="BgBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#0A1020" Offset="0"/>
+        <GradientStop Color="#0C1631" Offset="1"/>
+    </LinearGradientBrush>
+
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#101A2E"/>
+    <SolidColorBrush x:Key="InputBgBrush" Color="#0C1526"/>
+    <SolidColorBrush x:Key="LineBrush" Color="#25375C"/>
+    <SolidColorBrush x:Key="TextBrush" Color="#E6EEFF"/>
+    <SolidColorBrush x:Key="MutedBrush" Color="#8FA6CC"/>
+
+    <SolidColorBrush x:Key="AccentBrush" Color="#3B82F6"/>
+    <SolidColorBrush x:Key="AccentTextBrush" Color="#7DB2FF"/>
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#16294D"/>
+    <LinearGradientBrush x:Key="AccentGradientBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#6AA5FF" Offset="0"/>
+        <GradientStop Color="#2F6FF0" Offset="1"/>
+    </LinearGradientBrush>
+
+    <LinearGradientBrush x:Key="HeaderBrush" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Color="#050B1E" Offset="0"/>
+        <GradientStop Color="#0C2260" Offset="0.65"/>
+        <GradientStop Color="#1B4FC4" Offset="1"/>
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="ChipBrush" Color="#1AFFFFFF"/>
+    <SolidColorBrush x:Key="ChipLineBrush" Color="#33FFFFFF"/>
+    <SolidColorBrush x:Key="ChipTextBrush" Color="#DCE8FF"/>
+    <SolidColorBrush x:Key="HeaderSubBrush" Color="#9DB6E3"/>
+
+    <SolidColorBrush x:Key="GuideBgBrush" Color="#0E2146"/>
+    <SolidColorBrush x:Key="GuideBorderBrush" Color="#1F3F7A"/>
+    <SolidColorBrush x:Key="GuideTextBrush" Color="#BBD4FF"/>
+
+    <SolidColorBrush x:Key="EditorBgBrush" Color="#0A1322"/>
+    <SolidColorBrush x:Key="EditorFgBrush" Color="#DCE8FF"/>
+    <SolidColorBrush x:Key="LineNumBrush" Color="#4D6590"/>
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#2F4676"/>
+
+    <SolidColorBrush x:Key="OkBrush" Color="#4ADE80"/>
+    <SolidColorBrush x:Key="ErrorBrush" Color="#F87171"/>
+
+    <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="#101A2E"/>
+
+    <!-- glows (stronger on dark so they really glow) -->
+    <DropShadowEffect x:Key="CardGlow" Color="#3B82F6" Opacity="0.28" BlurRadius="20" ShadowDepth="0"/>
+    <DropShadowEffect x:Key="SoftGlow" Color="#3B82F6" Opacity="0.45" BlurRadius="11" ShadowDepth="0"/>
+    <DropShadowEffect x:Key="ButtonGlow" Color="#3B82F6" Opacity="0.70" BlurRadius="16" ShadowDepth="0"/>
+    <DropShadowEffect x:Key="ButtonGlowHot" Color="#60A5FA" Opacity="1" BlurRadius="26" ShadowDepth="0"/>
+    <DropShadowEffect x:Key="GlowStrong" Color="#60A5FA" Opacity="1" BlurRadius="10" ShadowDepth="0"/>
+    <DropShadowEffect x:Key="HeaderGlow" Color="#3B82F6" Opacity="0.55" BlurRadius="26" ShadowDepth="3" Direction="270"/>
+
+</ResourceDictionary>

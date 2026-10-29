@@ -1,0 +1,113 @@
+<UserControl x:Class="CadBridge.CadTabView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:avalon="http://icsharpcode.net/sharpdevelop/avalonedit"
+             PreviewKeyDown="View_KeyDown">
+    <Grid Margin="0,14,0,0">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="200" MinWidth="110" MaxWidth="420"/>
+            <ColumnDefinition Width="10"/>
+            <ColumnDefinition Width="*" MinWidth="300"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- LEFT: script library -->
+        <Grid Grid.Column="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Margin="0,0,0,6">
+                <TextBlock Text="Script library" FontWeight="SemiBold"/>
+                <TextBlock Text="Double-click a script to load it" FontSize="11"
+                           Foreground="{DynamicResource MutedBrush}"/>
+            </StackPanel>
+
+            <Border Grid.Row="1" CornerRadius="8" Background="{DynamicResource SurfaceBrush}"
+                    Effect="{DynamicResource CardGlow}"/>
+            <ListBox x:Name="ScriptList" Grid.Row="1" DisplayMemberPath="Display"
+                     MouseDoubleClick="ScriptList_DoubleClick"/>
+
+            <UniformGrid Grid.Row="2" Rows="1" Margin="0,8,0,0">
+                <Button Content="Save" ToolTip="Save script..." Height="30" Padding="6,0" Style="{StaticResource SecondaryButton}"
+                        Margin="0,0,4,0" Click="Save_Click"/>
+                <Button Content="Open" ToolTip="Open file..." Height="30" Padding="6,0" Style="{StaticResource SecondaryButton}"
+                        Margin="0,0,4,0" Click="Open_Click"/>
+                <Button Content="Delete" Height="30" Padding="6,0" Style="{StaticResource SecondaryButton}"
+                        Click="Delete_Click"/>
+            </UniformGrid>
+        </Grid>
+
+        <GridSplitter Grid.Column="1" Width="10" HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                      Background="Transparent" ShowsPreview="False" Cursor="SizeWE"/>
+
+        <!-- RIGHT: guide, toolbar, parameters, editor -->
+        <Grid Grid.Column="2">
+            <Grid.RowDefinitions>
+                <RowDefinition x:Name="TopRow" Height="Auto"/>
+                <RowDefinition x:Name="EditorRow" Height="*" MinHeight="150"/>
+            </Grid.RowDefinitions>
+
+            <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="6,6,6,0">
+                    <Border x:Name="GuideBorder" Background="{DynamicResource GuideBgBrush}" BorderBrush="{DynamicResource GuideBorderBrush}"
+                            BorderThickness="1" CornerRadius="8" Padding="14,10" Effect="{DynamicResource SoftGlow}">
+                        <TextBlock x:Name="GuideText" TextWrapping="Wrap" Foreground="{DynamicResource GuideTextBrush}" LineHeight="21"/>
+                    </Border>
+
+                    <WrapPanel Margin="0,12,0,4">
+                        <StackPanel x:Name="VersionPanel" Orientation="Horizontal" Margin="0,0,14,8"
+                                    Visibility="Collapsed">
+                            <TextBlock Text="Version" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource MutedBrush}" Margin="0,0,8,0"/>
+                            <ComboBox x:Name="VersionBox" Width="90" Height="34"
+                                      VerticalContentAlignment="Center" SelectionChanged="Version_Changed"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,14,8">
+                            <Button x:Name="ConnectBtn" Content="Connect" Style="{StaticResource SecondaryButton}"
+                                    Click="Connect_Click"/>
+                            <Ellipse x:Name="Dot" Width="10" Height="10" Fill="#9CA3AF" Margin="14,0,7,0"/>
+                            <TextBlock x:Name="StatusText" Text="Not connected" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource MutedBrush}"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <Button x:Name="InstallBtn" Content="Install add-in" Style="{StaticResource SecondaryButton}"
+                                    Margin="0,0,8,0" Visibility="Collapsed" Click="Install_Click"/>
+                            <Button x:Name="AsmBtn" Content="Build assembly" Style="{StaticResource SecondaryButton}"
+                                    Margin="0,0,8,0" Click="Asm_Click"/>
+                            <Button x:Name="RunBtn" Content="Run code  (F5)" Style="{StaticResource PrimaryButton}"
+                                    Click="Run_Click"/>
+                            <ToggleButton x:Name="GuideBtn" Content="Guide" Style="{StaticResource ChipToggle}" Margin="22,0,0,0"
+                                          ToolTip="Show / hide the how-to text" Checked="View_Toggled" Unchecked="View_Toggled"/>
+                            <ToggleButton x:Name="CodeBtn" Content="Code" Style="{StaticResource ChipToggle}" Margin="8,0,0,0"
+                                          ToolTip="Show / hide the code editor" Checked="View_Toggled" Unchecked="View_Toggled"/>
+                        </StackPanel>
+                    </WrapPanel>
+
+                    <Border x:Name="ParamBorder" Visibility="Collapsed" Background="{DynamicResource SurfaceBrush}"
+                            BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="8"
+                            Padding="12,8,12,2" Margin="0,4,0,10" Effect="{DynamicResource SoftGlow}">
+                        <StackPanel>
+                            <TextBlock Text="Parameters   (change the values, then press Run code)"
+                                       FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <WrapPanel x:Name="ParamPanel"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <Border x:Name="EditorHalo" Grid.Row="1" Margin="6,0,6,6" CornerRadius="8" Background="{DynamicResource EditorBgBrush}"
+                    Effect="{DynamicResource CardGlow}"/>
+            <Border x:Name="EditorBox" Grid.Row="1" Margin="6,0,6,6" Background="{DynamicResource EditorBgBrush}" BorderBrush="{DynamicResource LineBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="2">
+                <avalon:TextEditor x:Name="CodeBox" FontFamily="Consolas" FontSize="13"
+                                   ShowLineNumbers="True" WordWrap="False"
+                                   Background="{DynamicResource EditorBgBrush}" Foreground="{DynamicResource EditorFgBrush}"
+                                   LineNumbersForeground="{DynamicResource LineNumBrush}"
+                                   Padding="4"
+                                   HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"/>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

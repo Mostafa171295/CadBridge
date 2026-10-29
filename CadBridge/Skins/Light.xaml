@@ -1,0 +1,58 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ===== LIGHT: blue on white, with a soft blue glow ===== -->
+
+    <LinearGradientBrush x:Key="BgBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#F9FBFF" Offset="0"/>
+        <GradientStop Color="#E8F0FF" Offset="1"/>
+    </LinearGradientBrush>
+
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="InputBgBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="LineBrush" Color="#C7DAF6"/>
+    <SolidColorBrush x:Key="TextBrush" Color="#0F1E3D"/>
+    <SolidColorBrush x:Key="MutedBrush" Color="#5B6B8C"/>
+
+    <SolidColorBrush x:Key="AccentBrush" Color="#2563EB"/>
+    <SolidColorBrush x:Key="AccentTextBrush" Color="#1D4ED8"/>
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#E2EDFF"/>
+    <LinearGradientBrush x:Key="AccentGradientBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#5B9BFF" Offset="0"/>
+        <GradientStop Color="#2563EB" Offset="1"/>
+    </LinearGradientBrush>
+
+    <LinearGradientBrush x:Key="HeaderBrush" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Color="#0B2A6F" Offset="0"/>
+        <GradientStop Color="#1D4ED8" Offset="0.65"/>
+        <GradientStop Color="#3B82F6" Offset="1"/>
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="ChipBrush" Color="#2EFFFFFF"/>
+    <SolidColorBrush x:Key="ChipLineBrush" Color="#47FFFFFF"/>
+    <SolidColorBrush x:Key="ChipTextBrush" Color="#EAF2FF"/>
+    <SolidColorBrush x:Key="HeaderSubBrush" Color="#C7DAFB"/>
+
+    <SolidColorBrush x:Key="GuideBgBrush" Color="#EAF3FF"/>
+    <SolidColorBrush x:Key="GuideBorderBrush" Color="#B9D4FF"/>
+    <SolidColorBrush x:Key="GuideTextBrush" Color="#1E3A8A"/>
+
+    <SolidColorBrush x:Key="EditorBgBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="EditorFgBrush" Color="#0F1E3D"/>
+    <SolidColorBrush x:Key="LineNumBrush" Color="#9AAAC8"/>
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#B8CDEE"/>
+
+    <SolidColorBrush x:Key="OkBrush" Color="#16A34A"/>
+    <SolidColorBrush x:Key="ErrorBrush" Color="#DC2626"/>
+
+    <!-- some default WPF parts (scrollbar corner, ...) read this system brush -->
+    <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="#FFFFFF"/>
+
+    <!-- glows -->
+    <DropShadowEffect x:Key="CardGlow" Color="#2563EB" Opacity="0.18" BlurRadius="18" ShadowDepth="0"/>
+    <DropShadowEffect x:Key="SoftGlow" Color="#2563EB" Opacity="0.30" BlurRadius="10" ShadowDepth="0"/>
+    <DropShadowEffect x:Key="ButtonGlow" Color="#2563EB" Opacity="0.50" BlurRadius="14" ShadowDepth="0"/>
+    <DropShadowEffect x:Key="ButtonGlowHot" Color="#2563EB" Opacity="0.85" BlurRadius="22" ShadowDepth="0"/>
+    <DropShadowEffect x:Key="GlowStrong" Color="#2563EB" Opacity="0.90" BlurRadius="9" ShadowDepth="0"/>
+    <DropShadowEffect x:Key="HeaderGlow" Color="#2563EB" Opacity="0.40" BlurRadius="22" ShadowDepth="3" Direction="270"/>
+
+</ResourceDictionary>
